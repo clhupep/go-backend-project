@@ -8,6 +8,7 @@ import (
 	"strings"
 
 	"go-backend-project/internal/models"
+	"go-backend-project/internal/service"
 )
 
 type ProductDB struct{ DB *sql.DB }
@@ -65,4 +66,36 @@ func (s *ProductDB) Create(ctx context.Context, v models.ProductInput) (int64, e
 	var id int64
 	err = s.DB.QueryRowContext(ctx, `INSERT INTO products(title,description,price,rating,images,stock_quantity) SELECT $1,$2,$3,$4,ARRAY(SELECT jsonb_array_elements_text($5::jsonb)),$6 RETURNING id`, v.Title, v.Description, *v.Price, *v.Rating, string(images), *v.Stock).Scan(&id)
 	return id, err
+}
+func (s *ProductDB) Update(ctx context.Context, id int64, v models.ProductInput) error {
+	images, err := json.Marshal(v.Images)
+	if err != nil {
+		return err
+	}
+	result, err := s.DB.ExecContext(ctx, `UPDATE products SET title=$1,description=$2,price=$3,rating=$4,images=ARRAY(SELECT jsonb_array_elements_text($5::jsonb)),stock_quantity=$6 WHERE id=$7 AND deleted_at IS NULL`, v.Title, v.Description, *v.Price, *v.Rating, string(images), *v.Stock, id)
+	if err != nil {
+		return err
+	}
+	n, err := result.RowsAffected()
+	if err != nil {
+		return err
+	}
+	if n == 0 {
+		return service.ErrNotFound
+	}
+	return nil
+}
+func (s *ProductDB) Delete(ctx context.Context, id int64) error {
+	result, err := s.DB.ExecContext(ctx, "UPDATE products SET deleted_at=now() WHERE id=$1 AND deleted_at IS NULL", id)
+	if err != nil {
+		return err
+	}
+	n, err := result.RowsAffected()
+	if err != nil {
+		return err
+	}
+	if n == 0 {
+		return service.ErrNotFound
+	}
+	return nil
 }
