@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"net/http"
 	"os"
+	"strings"
 	"time"
 
 	"go-backend-project/internal/handler"
@@ -48,6 +49,27 @@ func Run() error {
 	}
 
 	router := gin.Default()
+	router.Use(func(c *gin.Context) {
+		origin := c.GetHeader("Origin")
+		allowed := os.Getenv("CORS_ORIGINS")
+		if allowed == "" {
+			allowed = "http://localhost:3000,http://localhost:5173,http://localhost:5500,http://127.0.0.1:5500"
+		}
+		c.Header("Vary", "Origin")
+		for _, value := range strings.Split(allowed, ",") {
+			if origin != "" && strings.TrimSpace(value) == origin {
+				c.Header("Access-Control-Allow-Origin", origin)
+				break
+			}
+		}
+		c.Header("Access-Control-Allow-Headers", "Authorization, Content-Type")
+		c.Header("Access-Control-Allow-Methods", "GET, POST, PUT, PATCH, DELETE, OPTIONS")
+		if c.Request.Method == http.MethodOptions {
+			c.AbortWithStatus(http.StatusNoContent)
+			return
+		}
+		c.Next()
+	})
 	users := service.NewUserService(storage.NewUserDB(db))
 	products := service.NewProductService(storage.NewProductDB(db), storage.NewProductCache(cache))
 	cart := service.NewCartService(storage.NewCartDB(db))
