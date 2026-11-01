@@ -10,6 +10,7 @@ import (
 	"strings"
 	"time"
 
+	"go-backend-project/internal/docs"
 	"go-backend-project/internal/handler"
 	"go-backend-project/internal/service"
 	"go-backend-project/internal/storage"
@@ -74,6 +75,7 @@ func Run() error {
 	products := service.NewProductService(storage.NewProductDB(db), storage.NewProductCache(cache))
 	cart := service.NewCartService(storage.NewCartDB(db))
 	handler.NewHandler(users, products, cart, []byte(secret)).RegisterRoutes(router)
+	docs.RegisterRoutes(router)
 	router.GET("/health", func(c *gin.Context) {
 		ctx, cancel := context.WithTimeout(c.Request.Context(), 2*time.Second)
 		defer cancel()
