@@ -14,6 +14,8 @@ Go, Gin, PostgreSQL (database/sql и pgx) и Redis.
 
 ## API
 
+Swagger UI: `http://localhost:8080/swagger`, спецификация OpenAPI — `GET /swagger/openapi.yaml` (файл `internal/docs/openapi.yaml`).
+
 - `POST /api/auth/register`, `POST /api/auth/login`: JSON с `email`, `password`; вход возвращает `token`.
 - `GET /api/products`: параметры `page`, `limit`, `search`, `min_price`, `max_price`, `min_rating`, `sort_by` (`title` или `price`), `order` (`asc` или `desc`).
 - Администратор: `POST /api/products`, `PUT /api/products/:id`, `DELETE /api/products/:id`. При создании и замене передаются `title`, `description`, `price`, `rating`, `images` (не менее трёх URL), `stock_quantity`.
@@ -21,4 +23,4 @@ Go, Gin, PostgreSQL (database/sql и pgx) и Redis.
 
 Защищённые запросы требуют заголовок `Authorization: Bearer <token>`. Каталог кэшируется в Redis на 90 секунд.
 
-Проект пока не содержит OpenAPI, настройки CORS и облачного развёртывания. Использование Go по заданию необходимо согласовать с преподавателем.
+Проект пока не содержит облачного развёртывания. Использование Go по заданию необходимо согласовать с преподавателем.

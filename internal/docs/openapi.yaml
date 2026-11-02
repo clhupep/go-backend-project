@@ -1,0 +1,426 @@
+openapi: 3.0.3
+info:
+  title: Backend интернет-магазина
+  description: |
+    REST API интернет-магазина: регистрация и вход, каталог товаров, корзина и промокоды.
+
+    Защищённые запросы требуют заголовок `Authorization: Bearer <token>`.
+    Токен выдаёт `POST /api/auth/login`, срок действия — 24 часа.
+  version: 1.0.0
+servers:
+  - url: /
+    description: Текущий сервер
+tags:
+  - name: auth
+    description: Регистрация и вход
+  - name: products
+    description: Каталог товаров
+  - name: admin
+    description: Управление товарами (только роль admin)
+  - name: cart
+    description: Корзина пользователя
+  - name: system
+    description: Служебные эндпоинты
+
+paths:
+  /api/auth/register:
+    post:
+      tags: [auth]
+      summary: Регистрация пользователя
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/Credentials' }
+      responses:
+        '201':
+          description: Пользователь создан
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/IDResponse' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '409':
+          description: Email уже занят
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
+              example: { error: email already exists }
+        '500': { $ref: '#/components/responses/InternalError' }
+
+  /api/auth/login:
+    post:
+      tags: [auth]
+      summary: Вход, получение JWT
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/Credentials' }
+      responses:
+        '200':
+          description: Успешный вход
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [token]
+                properties:
+                  token:
+                    type: string
+                    example: eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9...
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401':
+          description: Неверный пароль
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
+              example: { error: invalid credentials }
+        '404':
+          description: Пользователь не найден
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
+              example: { error: user not found }
+        '500': { $ref: '#/components/responses/InternalError' }
+
+  /api/products:
+    get:
+      tags: [products]
+      summary: Список товаров с фильтрами, сортировкой и пагинацией
+      description: Ответ кэшируется в Redis на 90 секунд.
+      parameters:
+        - { name: page, in: query, schema: { type: integer, minimum: 1, maximum: 1000000, default: 1 } }
+        - { name: limit, in: query, schema: { type: integer, minimum: 1, maximum: 100, default: 12 } }
+        - { name: search, in: query, description: Поиск по названию, schema: { type: string } }
+        - { name: min_price, in: query, schema: { type: number, minimum: 0 } }
+        - { name: max_price, in: query, schema: { type: number, minimum: 0 } }
+        - { name: min_rating, in: query, schema: { type: number, minimum: 0, maximum: 5 } }
+        - { name: sort_by, in: query, schema: { type: string, enum: [title, price], default: title } }
+        - { name: order, in: query, schema: { type: string, enum: [asc, desc], default: asc } }
+      responses:
+        '200':
+          description: Страница товаров
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ProductPage' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '500': { $ref: '#/components/responses/InternalError' }
+        '503': { $ref: '#/components/responses/CacheUnavailable' }
+    post:
+      tags: [admin]
+      summary: Создать товар
+      security: [{ bearerAuth: [] }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/ProductInput' }
+      responses:
+        '201':
+          description: Товар создан
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/IDResponse' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '500': { $ref: '#/components/responses/InternalError' }
+        '503': { $ref: '#/components/responses/CacheUnavailable' }
+
+  /api/products/{id}:
+    parameters:
+      - $ref: '#/components/parameters/ID'
+    put:
+      tags: [admin]
+      summary: Заменить товар
+      security: [{ bearerAuth: [] }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/ProductInput' }
+      responses:
+        '204': { description: Товар обновлён }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '500': { $ref: '#/components/responses/InternalError' }
+        '503': { $ref: '#/components/responses/CacheUnavailable' }
+    delete:
+      tags: [admin]
+      summary: Удалить товар (мягкое удаление)
+      security: [{ bearerAuth: [] }]
+      responses:
+        '204': { description: Товар удалён }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '500': { $ref: '#/components/responses/InternalError' }
+        '503': { $ref: '#/components/responses/CacheUnavailable' }
+
+  /api/cart:
+    get:
+      tags: [cart]
+      summary: Получить корзину
+      security: [{ bearerAuth: [] }]
+      responses:
+        '200':
+          description: Корзина с суммами и скидкой
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Cart' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '500': { $ref: '#/components/responses/InternalError' }
+
+  /api/cart/items:
+    post:
+      tags: [cart]
+      summary: Добавить товар в корзину
+      security: [{ bearerAuth: [] }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [product_id, quantity]
+              properties:
+                product_id: { type: integer, format: int64, minimum: 1, example: 1 }
+                quantity: { type: integer, minimum: 1, example: 2 }
+      responses:
+        '201':
+          description: Товар добавлен, возвращается ID элемента корзины
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/IDResponse' }
+        '400':
+          description: Неверные данные, товар недоступен или его недостаточно на складе
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
+              example: { error: product unavailable or insufficient stock }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '500': { $ref: '#/components/responses/InternalError' }
+
+  /api/cart/items/{id}:
+    parameters:
+      - $ref: '#/components/parameters/ID'
+    patch:
+      tags: [cart]
+      summary: Изменить количество товара в корзине
+      security: [{ bearerAuth: [] }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [quantity]
+              properties:
+                quantity: { type: integer, minimum: 1, example: 3 }
+      responses:
+        '204': { description: Количество обновлено }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '404':
+          description: Элемент не найден или товара недостаточно на складе
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
+              example: { error: item unavailable or insufficient stock }
+        '500': { $ref: '#/components/responses/InternalError' }
+    delete:
+      tags: [cart]
+      summary: Удалить товар из корзины
+      security: [{ bearerAuth: [] }]
+      responses:
+        '204': { description: Элемент удалён }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '500': { $ref: '#/components/responses/InternalError' }
+
+  /api/cart/apply-promo:
+    post:
+      tags: [cart]
+      summary: Применить промокод
+      description: Промокод `SAVE10` даёт скидку 10%.
+      security: [{ bearerAuth: [] }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [code]
+              properties:
+                code: { type: string, example: SAVE10 }
+      responses:
+        '200':
+          description: Корзина с применённой скидкой
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Cart' }
+        '400':
+          description: Неверный или неактивный промокод
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
+              example: { error: invalid promo code }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '500': { $ref: '#/components/responses/InternalError' }
+
+  /health:
+    get:
+      tags: [system]
+      summary: Проверка доступности PostgreSQL и Redis
+      responses:
+        '200':
+          description: Сервис готов
+          content:
+            application/json:
+              schema: { type: object, properties: { status: { type: string, example: ok } } }
+        '503':
+          description: База или Redis недоступны
+          content:
+            application/json:
+              schema: { type: object, properties: { status: { type: string, example: unavailable } } }
+
+components:
+  securitySchemes:
+    bearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+
+  parameters:
+    ID:
+      name: id
+      in: path
+      required: true
+      schema: { type: integer, format: int64, minimum: 1 }
+
+  responses:
+    BadRequest:
+      description: Неверные входные данные
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/Error' }
+          example: { error: invalid product }
+    Unauthorized:
+      description: Нет токена или он недействителен
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/Error' }
+          example: { error: authorization required }
+    Forbidden:
+      description: Нужна роль admin
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/Error' }
+          example: { error: admin access required }
+    NotFound:
+      description: Не найдено
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/Error' }
+          example: { error: product not found }
+    InternalError:
+      description: Ошибка базы данных
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/Error' }
+          example: { error: database error }
+    CacheUnavailable:
+      description: Redis недоступен
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/Error' }
+          example: { error: cache unavailable }
+
+  schemas:
+    Error:
+      type: object
+      required: [error]
+      properties:
+        error: { type: string }
+
+    IDResponse:
+      type: object
+      required: [id]
+      properties:
+        id: { type: integer, format: int64, example: 1 }
+
+    Credentials:
+      type: object
+      required: [email, password]
+      properties:
+        email: { type: string, format: email, maxLength: 255, example: user@example.com }
+        password: { type: string, format: password, minLength: 8, maxLength: 72, example: password123 }
+
+    Product:
+      type: object
+      properties:
+        id: { type: integer, format: int64, example: 1 }
+        title: { type: string, example: Ноутбук }
+        description: { type: string, example: '15.6 дюйма, 16 ГБ RAM' }
+        price: { type: number, format: double, example: 2499.99 }
+        rating: { type: number, format: double, example: 4.7 }
+        images:
+          type: array
+          items: { type: string, format: uri }
+          example: ['https://example.com/1.jpg', 'https://example.com/2.jpg', 'https://example.com/3.jpg']
+        stock_quantity: { type: integer, example: 10 }
+        created_at: { type: string, format: date-time }
+
+    ProductInput:
+      type: object
+      required: [title, price, rating, images, stock_quantity]
+      properties:
+        title: { type: string, maxLength: 255, example: Ноутбук }
+        description: { type: string, example: '15.6 дюйма, 16 ГБ RAM' }
+        price: { type: number, format: double, minimum: 0, maximum: 9999999999, example: 2499.99 }
+        rating: { type: number, format: double, minimum: 0, maximum: 5, example: 4.7 }
+        images:
+          type: array
+          minItems: 3
+          items: { type: string, format: uri }
+          example: ['https://example.com/1.jpg', 'https://example.com/2.jpg', 'https://example.com/3.jpg']
+        stock_quantity: { type: integer, minimum: 0, example: 10 }
+
+    PageMeta:
+      type: object
+      properties:
+        total_items: { type: integer, example: 42 }
+        total_pages: { type: integer, example: 4 }
+        current_page: { type: integer, example: 1 }
+        limit: { type: integer, example: 12 }
+
+    ProductPage:
+      type: object
+      properties:
+        items:
+          type: array
+          items: { $ref: '#/components/schemas/Product' }
+        meta: { $ref: '#/components/schemas/PageMeta' }
+
+    CartItem:
+      type: object
+      properties:
+        id: { type: integer, format: int64, example: 5 }
+        product_id: { type: integer, format: int64, example: 1 }
+        title: { type: string, example: Ноутбук }
+        price: { type: number, format: double, example: 2499.99 }
+        quantity: { type: integer, example: 2 }
+
+    Cart:
+      type: object
+      properties:
+        items:
+          type: array
+          items: { $ref: '#/components/schemas/CartItem' }
+        subtotal: { type: number, format: double, example: 4999.98 }
+        discount_percentage: { type: integer, example: 10 }
+        total: { type: number, format: double, example: 4499.98 }
